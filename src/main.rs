@@ -9,6 +9,8 @@ const WIDTH: u32 = 1366;
 const HEIGHT: u32 = 768;
 const BPP: u32 = 32;
 const DRM_CAP_DUMB_BUFFER: u64 = 1;
+// DRM_FORMAT_XRGB8888: fourcc('X', 'R', '2', '4'), DRM little-endian.
+const DRM_FORMAT_XRGB8888: u32 = 0x3432_5258;
 
 const PROT_READ: c_int = 1;
 const PROT_WRITE: c_int = 2;
@@ -54,6 +56,18 @@ unsafe extern "C" {
     ) -> c_int;
     fn drmModeMapDumbBuffer(fd: c_int, handle: u32, offset: *mut u64) -> c_int;
     fn drmModeDestroyDumbBuffer(fd: c_int, handle: u32) -> c_int;
+    fn drmModeAddFB2(
+        fd: c_int,
+        width: u32,
+        height: u32,
+        pixel_format: u32,
+        bo_handles: *const u32,
+        pitches: *const u32,
+        offsets: *const u32,
+        buf_id: *mut u32,
+        flags: u32,
+    ) -> c_int;
+    fn drmModeRmFB(fd: c_int, buffer_id: u32) -> c_int;
 }
 
 #[link(name = "pixman-1")]
@@ -202,6 +216,46 @@ impl Drop for DumbBuffer<'_> {
     }
 }
 
+
+/// Un FB KMS es un objeto distinto del dumb buffer.
+/// Debe retirarse antes de destruir el buffer que referencia.
+struct KmsFramebuffer<'a> {
+    file: &'a File,
+    id: u32,
+}
+
+impl<'a> KmsFramebuffer<'a> {
+    fn register(file: &'a File, buffer: &DumbBuffer<'_>) -> io::Result<Self> {
+        let handles: [u32; 4] = [buffer.handle, 0, 0, 0];
+        let pitches: [u32; 4] = [buffer.pitch, 0, 0, 0];
+        let offsets: [u32; 4] = [0; 4];
+        let mut id: u32 = 0;
+        let result = unsafe {
+            drmModeAddFB2(
+                file.as_raw_fd(), WIDTH, HEIGHT, DRM_FORMAT_XRGB8888,
+                handles.as_ptr(), pitches.as_ptr(), offsets.as_ptr(),
+                &mut id, 0,
+            )
+        };
+        if result != 0 {
+            return Err(drm_error("drmModeAddFB2", result));
+        }
+        if id == 0 {
+            return Err(io::Error::other("drmModeAddFB2 devolvió un ID cero"));
+        }
+        Ok(Self { file, id })
+    }
+}
+
+impl Drop for KmsFramebuffer<'_> {
+    fn drop(&mut self) {
+        let result = unsafe { drmModeRmFB(self.file.as_raw_fd(), self.id) };
+        if result != 0 {
+            eprintln!("Advertencia: drmModeRmFB({}) falló: {}", self.id, drm_error("drmModeRmFB", result));
+        }
+    }
+}
+
 struct PixmanView(*mut PixmanImage);
 impl Drop for PixmanView {
     fn drop(&mut self) {
@@ -277,8 +331,16 @@ fn main() -> io::Result<()> {
         }
     }
 
-    buffer.save_ppm("drm-03.ppm")?;
-    println!("Imagen guardada: drm-03.ppm");
-    println!("Sin modeset: la pantalla no fue modificada.");
+    // Se registra el mismo dumb buffer como framebuffer utilizable por KMS.
+    // No se asocia a ningún CRTC y no se presenta todavía en pantalla.
+    {
+        let framebuffer = KmsFramebuffer::register(&file, &buffer)?;
+        println!("Framebuffer KMS registrado: ID {}", framebuffer.id);
+        println!("Se retirará mediante drmModeRmFB sin presentarlo.");
+    } // KmsFramebuffer::drop -> drmModeRmFB
+
+    buffer.save_ppm("drm-04.ppm")?;
+    println!("Imagen guardada: drm-04.ppm");
+    println!("Sin modeset ni page flip: la pantalla no fue modificada.");
     Ok(())
 }

@@ -1,1 +1,1 @@
-Allocate a 1366x768 dumb buffer on /dev/dri/card1, map it using mmap, draw three rectangles using libpixman-1, check three pixels, and export drm-03.ppm.
+Registrar un dumb buffer + Pixman como framebuffer KMS.
