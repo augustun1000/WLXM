@@ -1,2 +1,2 @@
-# WLXM
-A new Wayland Library and Extremely Modular
+# YWMR
+Yet Wayland Modular... Really
