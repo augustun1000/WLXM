@@ -1,1 +1,6 @@
-Registrar un dumb buffer + Pixman como framebuffer KMS.
+This version incorporates the selection of the CRTC associated with eDP-1, session management with libseat, and a display test using drmModeSetCrtc(). Device access and session notifications follow the libseat interface.
+
+The program will attempt to display the same rectangles we drew with Pixman for three seconds and then restore the previous mode.
+#In tty
+cargo --release build &
+./drm-05 --show /dev/dri/card1
